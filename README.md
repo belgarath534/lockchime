@@ -9,6 +9,7 @@ An NVDA add-on that plays a sound when Caps Lock, Num Lock, or Scroll Lock is tu
 - Eight built-in sounds to choose from: Classic Positive, Classic Negative, Soft Positive, Soft Negative, Bell Ding, Quick Hint, Retro Coin, and Notification Ping
 - Or use your own WAV file for any on/off slot
 - Disable any key or state independently
+- Per-key volume control
 - Test buttons to preview each sound before saving
 
 ## Installation

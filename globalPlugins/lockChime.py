@@ -16,6 +16,9 @@ import os
 import threading
 import ctypes
 import nvwave
+import wave
+import array
+import tempfile
 
 addonHandler.initTranslation()
 
@@ -38,6 +41,7 @@ KEY_VK = {
 confspec = {}
 for key in KEYS:
     confspec[f"{key}Enabled"] = "boolean(default=True)"
+    confspec[f"{key}Volume"] = "integer(default=100, min=0, max=100)"
     for state in ("On", "Off"):
         defaultSound = "pos1" if state == "On" else "neg1"
         confspec[f"{key}{state}Mode"] = "string(default='pack')"
@@ -68,10 +72,32 @@ def get_pack_sound_path(sound_id):
     return os.path.join(get_sounds_dir(), sound_id + ".wav")
 
 
-def play_sound(path):
+def apply_volume(src_path, volume_percent, cache_key):
+    if volume_percent >= 100:
+        return src_path
+    try:
+        with wave.open(src_path, "rb") as w:
+            params = w.getparams()
+            frames = w.readframes(w.getnframes())
+        if params.sampwidth != 2:
+            return src_path
+        samples = array.array("h", frames)
+        factor = max(0, min(100, volume_percent)) / 100.0
+        for i in range(len(samples)):
+            samples[i] = int(samples[i] * factor)
+        out_path = os.path.join(tempfile.gettempdir(), f"lockchime_{cache_key}.wav")
+        with wave.open(out_path, "wb") as out:
+            out.setparams(params)
+            out.writeframes(samples.tobytes())
+        return out_path
+    except Exception:
+        return src_path
+
+
+def play_sound(path, volume_percent=100, cache_key="tmp"):
     def _play():
         try:
-            nvwave.playWaveFile(path)
+            nvwave.playWaveFile(apply_volume(path, volume_percent, cache_key))
         except Exception:
             pass
     threading.Thread(target=_play, daemon=True).start()
@@ -95,14 +121,15 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         mode = config.conf["LockChime"][f"{key}{prefix}Mode"]
         sound_id = config.conf["LockChime"][f"{key}{prefix}Sound"]
         custom_path = config.conf["LockChime"][f"{key}{prefix}CustomPath"]
+        volume = config.conf["LockChime"][f"{key}Volume"]
 
         if mode == "pack":
             path = get_pack_sound_path(sound_id)
             if os.path.isfile(path):
-                play_sound(path)
+                play_sound(path, volume, f"{key}{prefix}")
         elif mode == "custom":
             if custom_path and os.path.isfile(custom_path):
-                play_sound(custom_path)
+                play_sound(custom_path, volume, f"{key}{prefix}")
 
     def script_capsLock(self, gesture):
         gesture.send()
@@ -146,6 +173,12 @@ class LockChimeSettingsPanel(gui.settingsDialogs.SettingsPanel):
             enabledCtrl = helper.addItem(wx.CheckBox(self, label=f"Enable {KEY_LABELS[key]} sounds"))
             enabledCtrl.SetValue(config.conf["LockChime"][f"{key}Enabled"])
             self._controls[f"{key}Enabled"] = enabledCtrl
+
+            volumeCtrl = helper.addLabeledControl(
+                f"{KEY_LABELS[key]} volume:", wx.SpinCtrl, min=0, max=100,
+                initial=config.conf["LockChime"][f"{key}Volume"]
+            )
+            self._controls[f"{key}Volume"] = volumeCtrl
 
             for state in ("On", "Off"):
                 modeCtrl = helper.addLabeledControl(
@@ -201,7 +234,8 @@ class LockChimeSettingsPanel(gui.settingsDialogs.SettingsPanel):
             return
 
         if path and os.path.isfile(path):
-            play_sound(path)
+            volume = self._controls[f"{key}Volume"].GetValue()
+            play_sound(path, volume, f"preview_{key}{state}")
         else:
             gui.messageBox(f"Sound file not found:\n{path}", "LockChime", wx.OK | wx.ICON_ERROR)
 
@@ -211,6 +245,7 @@ class LockChimeSettingsPanel(gui.settingsDialogs.SettingsPanel):
 
         for key in KEYS:
             config.conf["LockChime"][f"{key}Enabled"] = self._controls[f"{key}Enabled"].GetValue()
+            config.conf["LockChime"][f"{key}Volume"] = self._controls[f"{key}Volume"].GetValue()
             for state in ("On", "Off"):
                 config.conf["LockChime"][f"{key}{state}Mode"] = modeMap[self._controls[f"{key}{state}Mode"].GetSelection()]
                 config.conf["LockChime"][f"{key}{state}Sound"] = packIds[self._controls[f"{key}{state}Sound"].GetSelection()]
